@@ -1,19 +1,24 @@
 package main
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5"
+	repo "github.com/rubentanahara/ecomapi/internal/adapters/postgresql/sqlc"
+	"github.com/rubentanahara/ecomapi/internal/orders"
+	ordersPostgres "github.com/rubentanahara/ecomapi/internal/orders/adapters/postgres"
 	"github.com/rubentanahara/ecomapi/internal/products"
+	productsPostgres "github.com/rubentanahara/ecomapi/internal/products/adapters/postgres"
 )
 
 type application struct {
 	configuration configuration
-	// logger
-	// db driver
+	database      *pgx.Conn
 }
 
 func (app *application) mount() http.Handler {
@@ -30,14 +35,22 @@ func (app *application) mount() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
-
-	productsHandler := products.NewHandler(nil)
+	productRepo := productsPostgres.NewRepository(repo.New(app.database))
+	productService := products.NewService(productRepo)
+	productsHandler := products.NewHandler(productService, products.WithLogger(slog.Default()))
 	router.Get("/products", productsHandler.ListProducts)
+	router.Get("/products/{id}", productsHandler.GetProduct)
+
+	ordersRepo := ordersPostgres.NewRepository(repo.New(app.database), app.database)
+	ordersService := orders.NewService(ordersRepo)
+	ordersHandler := orders.NewHandler(ordersService, orders.WithLogger(slog.Default()))
+	router.Post("/orders", ordersHandler.PlaceOrder)
+	router.Get("/orders", ordersHandler.ListOrders)
 
 	return router
 }
 
-func (app *application) run(handler http.Handler) error {
+func (app *application) run(ctx context.Context, handler http.Handler) error {
 	server := &http.Server{
 		Addr:         app.configuration.address,
 		Handler:      handler,
@@ -46,9 +59,26 @@ func (app *application) run(handler http.Handler) error {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Printf("Starting server on %s ", app.configuration.address)
+	errChan := make(chan error, 1)
 
-	return server.ListenAndServe()
+	go func() {
+		slog.Info("Starting server", "address", app.configuration.address)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errChan <- err
+		}
+	}()
+
+	select {
+	case err := <-errChan:
+		return err
+	case <-ctx.Done():
+		slog.Info("Shutting down server gracefully...")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		return server.Shutdown(shutdownCtx)
+	}
 }
 
 type configuration struct {

@@ -1,0 +1,23 @@
+meta {
+  name: "Create Order"
+  type: "http"
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/orders
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "customerId": 1,
+    "items": [
+      {
+        "productId": 2,
+        "quantity": 1
+      }
+    ]
+  }
+}
