@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	repo "github.com/rubentanahara/ecomapi/internal/adapters/postgresql/sqlc"
 	"github.com/rubentanahara/ecomapi/internal/orders"
 	ordersPostgres "github.com/rubentanahara/ecomapi/internal/orders/adapters/postgres"
@@ -18,7 +18,7 @@ import (
 
 type application struct {
 	configuration configuration
-	database      *pgx.Conn
+	database      *pgxpool.Pool
 }
 
 func (app *application) mount() http.Handler {

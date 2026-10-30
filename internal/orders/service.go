@@ -2,17 +2,11 @@ package orders
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"sort"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/rubentanahara/ecomapi/internal/orders/domain"
 	"github.com/rubentanahara/ecomapi/internal/orders/ports"
-)
-
-var (
-	ErrProductNotFound = errors.New("product not found")
-	ErrProductNoStock  = errors.New("product has not enough stock")
 )
 
 type Service struct {
@@ -32,51 +26,66 @@ func (s *Service) ListOrders(ctx context.Context) ([]domain.Order, error) {
 }
 
 func (s *Service) PlaceOrder(ctx context.Context, req CreateOrderRequest) (domain.Order, error) {
-	if req.CustomerID == 0 {
-		return domain.Order{}, fmt.Errorf("customer ID is required")
-	}
-	if len(req.Items) == 0 {
-		return domain.Order{}, fmt.Errorf("at least one item is required")
+	items, err := normalizeItems(req)
+	if err != nil {
+		return domain.Order{}, err
 	}
 
 	var createdOrder domain.Order
 
-	err := s.repo.WithTx(ctx, func(txRepo ports.Repository) error {
+	err = s.repo.WithTx(ctx, func(txRepo ports.Repository) error {
 		order, err := txRepo.CreateOrder(ctx, req.CustomerID)
 		if err != nil {
 			return fmt.Errorf("failed to create order: %w", err)
 		}
 
-		for _, item := range req.Items {
-			product, err := txRepo.FindProductByID(ctx, item.ProductID)
+		for _, item := range items {
+			price, err := txRepo.ReserveStock(ctx, item.ProductID, item.Quantity)
 			if err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					return fmt.Errorf("failed to find product %d: %w", item.ProductID, ErrProductNotFound)
-				}
-				return fmt.Errorf("failed to find product %d: %w", item.ProductID, err)
+				return fmt.Errorf("product %d: %w", item.ProductID, err)
 			}
 
-			if product.Quantity < item.Quantity {
-				return fmt.Errorf("product %d: %w", item.ProductID, ErrProductNoStock)
-			}
-
-			err = txRepo.CreateOrderItem(ctx, domain.OrderItem{
+			created, err := txRepo.CreateOrderItem(ctx, domain.OrderItem{
 				OrderID:    order.ID,
 				ProductID:  item.ProductID,
 				Quantity:   item.Quantity,
-				PriceCents: product.PriceInCents,
+				PriceCents: price,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create order item: %w", err)
 			}
+			order.Items = append(order.Items, created)
 		}
 		createdOrder = order
 		return nil
 	})
-
 	if err != nil {
 		return domain.Order{}, err
 	}
 
 	return createdOrder, nil
+}
+
+func normalizeItems(req CreateOrderRequest) ([]OrderItemRequest, error) {
+	if req.CustomerID == 0 {
+		return nil, fmt.Errorf("%w: customer ID is required", domain.ErrInvalidOrder)
+	}
+	if len(req.Items) == 0 {
+		return nil, fmt.Errorf("%w: at least one item is required", domain.ErrInvalidOrder)
+	}
+
+	quantityByProduct := make(map[int64]int32, len(req.Items))
+	for _, item := range req.Items {
+		if item.Quantity <= 0 {
+			return nil, fmt.Errorf("%w: quantity for product %d must be positive", domain.ErrInvalidOrder, item.ProductID)
+		}
+		quantityByProduct[item.ProductID] += item.Quantity
+	}
+
+	items := make([]OrderItemRequest, 0, len(quantityByProduct))
+	for productID, quantity := range quantityByProduct {
+		items = append(items, OrderItemRequest{ProductID: productID, Quantity: quantity})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ProductID < items[j].ProductID })
+	return items, nil
 }

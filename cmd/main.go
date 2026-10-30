@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rubentanahara/ecomapi/internal/env"
 )
 
@@ -27,18 +27,23 @@ func main() {
 	slog.SetDefault(logger)
 
 	// database
-	conn, err := pgx.Connect(ctx, cfg.databaseConfig.dsn)
+	pool, err := pgxpool.New(ctx, cfg.databaseConfig.dsn)
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	defer conn.Close(context.Background())
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		slog.Error("Failed to connect to database", "error", err)
+		os.Exit(1)
+	}
 
 	logger.Info("Connected to database", "dsn", cfg.databaseConfig.dsn)
 
 	api := application{
 		configuration: cfg,
-		database:      conn,
+		database:      pool,
 	}
 
 	if err := api.run(ctx, api.mount()); err != nil {
