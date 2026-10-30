@@ -1,6 +1,15 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrProductNotFound = errors.New("product not found")
+	ErrProductNoStock  = errors.New("product has not enough stock")
+	ErrInvalidOrder    = errors.New("invalid order")
+)
 
 type Order struct {
 	ID         int64       `json:"id"`
@@ -15,11 +24,4 @@ type OrderItem struct {
 	ProductID  int64 `json:"product_id"`
 	Quantity   int32 `json:"quantity"`
 	PriceCents int32 `json:"price_cents"`
-}
-
-// Product in orders domain context
-type Product struct {
-	ID           int64 `json:"id"`
-	PriceInCents int32 `json:"price_in_cents"`
-	Quantity     int32 `json:"quantity"`
 }

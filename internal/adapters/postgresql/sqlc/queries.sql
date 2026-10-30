@@ -25,4 +25,20 @@ VALUES ($1, $2, $3, $4) RETURNING *;
 SELECT
   *
 FROM
-  orders;
+  orders
+ORDER BY
+  id;
+
+-- name: DecrementProductStock :one
+UPDATE products
+SET quantity = quantity - $2
+WHERE id = $1 AND quantity >= $2
+RETURNING price_in_cents;
+
+-- name: ListOrderItems :many
+SELECT
+  *
+FROM
+  order_items
+ORDER BY
+  id;

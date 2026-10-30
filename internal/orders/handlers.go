@@ -60,24 +60,19 @@ func (h *handler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Basic validation
-	if req.CustomerID == 0 {
-		json.Write(w, http.StatusBadRequest, map[string]string{"error": "customer ID is required"})
-		return
-	}
-	if len(req.Items) == 0 {
-		json.Write(w, http.StatusBadRequest, map[string]string{"error": "at least one item is required"})
-		return
-	}
-
 	createdOrder, err := h.service.PlaceOrder(r.Context(), req)
 	if err != nil {
-		if errors.Is(err, ErrProductNotFound) {
+		if errors.Is(err, domain.ErrInvalidOrder) {
+			json.Write(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		if errors.Is(err, domain.ErrProductNotFound) {
 			json.Write(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
 
-		if errors.Is(err, ErrProductNoStock) {
+		if errors.Is(err, domain.ErrProductNoStock) {
 			json.Write(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
 		}
